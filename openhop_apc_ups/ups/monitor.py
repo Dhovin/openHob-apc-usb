@@ -15,6 +15,7 @@ from typing import Any
 
 from ..config import Settings
 from .base import BaseUPSDriver, UPSData, UPSStatus
+from .installer import ensure_turnkey_apcupsd
 from .nis_client import ApcNisClient
 from .simulator import UpsSimulator
 from .usb_hid import DirectUsbHidDriver
@@ -39,6 +40,7 @@ class UpsMonitor:
         self._history: deque[dict[str, Any]] = deque(maxlen=60)
         self._events: deque[dict[str, Any]] = deque(maxlen=30)
         self._listeners: list[Callable[[str, UPSData], None]] = []
+        self._last_nis_probe: float = time.time()
 
     def add_listener(self, listener: Callable[[str, UPSData], None]) -> None:
         self._listeners.append(listener)
@@ -91,6 +93,18 @@ class UpsMonitor:
             self.driver = nis
             return nis
 
+        # Turnkey helper: try to start or install apcupsd automatically
+        logger.info("APC NIS daemon not responding. Running turnkey apcupsd supervisor...")
+        success, msg = ensure_turnkey_apcupsd()
+        if success:
+            logger.info("Turnkey supervisor: %s", msg)
+            if await nis.connect():
+                logger.info("Connected to apcupsd NIS daemon following turnkey setup!")
+                self.driver = nis
+                return nis
+        else:
+            logger.debug("Turnkey supervisor notice: %s", msg)
+
         vid = int(self.settings.usb_vendor_id, 16) if self.settings.usb_vendor_id else 0x051D
         usb_driver = DirectUsbHidDriver(vendor_id=vid, device_path=self.settings.usb_device_path)
         if await usb_driver.connect():
@@ -113,6 +127,12 @@ class UpsMonitor:
         """Fetch status and trigger any state change events."""
         if self.driver is None:
             await self.initialize_driver()
+        elif isinstance(self.driver, DirectUsbHidDriver) and (time.time() - self._last_nis_probe > 30.0):
+            self._last_nis_probe = time.time()
+            nis = ApcNisClient(host=self.settings.nis_host, port=self.settings.nis_port)
+            if await nis.connect():
+                logger.info("APC NIS daemon (apcupsd) became available! Switching to live NIS telemetry.")
+                self.driver = nis
 
         try:
             assert self.driver is not None

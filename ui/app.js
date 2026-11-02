@@ -24,17 +24,36 @@
     return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   }
 
+  function getJwtToken() {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const queryToken = urlParams.get("token");
+      if (queryToken) {
+        window.localStorage.setItem("pymc_jwt_token", queryToken);
+        return queryToken;
+      }
+      return (
+        window.localStorage.getItem("pymc_jwt_token") ||
+        window.localStorage.getItem("token") ||
+        window.sessionStorage.getItem("pymc_jwt_token") ||
+        ""
+      );
+    } catch (_) {
+      return "";
+    }
+  }
+
   function updateStatusBadge(statusEnum, rawStatus) {
     elStatusBadge.className = "badge";
     const s = (statusEnum || "UNKNOWN").toUpperCase();
 
-    if (s === "ONLINE") {
+    if (s === "ONLINE" || s.includes("ONLINE")) {
       elStatusBadge.textContent = "Online";
       elStatusBadge.classList.add("online");
-    } else if (s === "ON_BATTERY") {
+    } else if (s === "ON_BATTERY" || s.includes("ONBATT")) {
       elStatusBadge.textContent = "On Battery";
       elStatusBadge.classList.add("on-battery");
-    } else if (s === "LOW_BATTERY") {
+    } else if (s === "LOW_BATTERY" || s.includes("LOWBATT")) {
       elStatusBadge.textContent = "Low Battery";
       elStatusBadge.classList.add("low-battery");
     } else {
@@ -92,7 +111,19 @@
 
   async function fetchTelemetry() {
     try {
-      const resp = await fetch(RUNTIME_ENDPOINT, { cache: "no-store" });
+      const headers = { Accept: "application/json" };
+      const token = getJwtToken();
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const resp = await fetch(RUNTIME_ENDPOINT, { headers, cache: "no-store" });
+      if (resp.status === 401) {
+        elStatusBadge.textContent = "Auth Required";
+        elStatusBadge.className = "badge offline";
+        console.warn("openHop runtime API returned 401 Unauthorized. Ensure you are logged into openHop or pass ?token=YOUR_TOKEN.");
+        return;
+      }
       if (!resp.ok) {
         throw new Error(`HTTP ${resp.status}`);
       }
@@ -129,10 +160,16 @@
       updateStatusBadge(ups.status_enum, ups.status);
       updateBatteryUI(ups.battery_charge_pct, ups.time_left_minutes);
 
-      elLineVoltage.textContent = (ups.line_voltage !== null && ups.line_voltage !== undefined) ? `${ups.line_voltage.toFixed(1)} V` : "-- V";
+      elLineVoltage.textContent = (ups.line_voltage !== null && ups.line_voltage !== undefined && ups.line_voltage > 0)
+        ? `${ups.line_voltage.toFixed(1)} V`
+        : "N/A";
       elLoadPct.textContent = (ups.load_pct !== null && ups.load_pct !== undefined) ? `${ups.load_pct.toFixed(1)}%` : "--%";
-      elBatteryVoltage.textContent = (ups.battery_voltage !== null && ups.battery_voltage !== undefined) ? `${ups.battery_voltage.toFixed(1)} V` : "-- V";
-      elInternalTemp.textContent = (ups.internal_temp_c !== null && ups.internal_temp_c !== undefined) ? `${ups.internal_temp_c.toFixed(1)} C` : "N/A";
+      elBatteryVoltage.textContent = (ups.battery_voltage !== null && ups.battery_voltage !== undefined && ups.battery_voltage > 0)
+        ? `${ups.battery_voltage.toFixed(1)} V`
+        : "-- V";
+      elInternalTemp.textContent = (ups.internal_temp_c !== null && ups.internal_temp_c !== undefined)
+        ? `${ups.internal_temp_c.toFixed(1)} C`
+        : "N/A";
       elDriverType.textContent = (ups.driver_type || "auto").toUpperCase();
     }
 
