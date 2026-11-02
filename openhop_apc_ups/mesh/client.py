@@ -10,7 +10,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from openhop_core.companion.constants import (
+from .constants import (
     CMD_APP_START,
     CMD_DEVICE_QUERY,
     CMD_SEND_CHANNEL_TXT_MSG,
