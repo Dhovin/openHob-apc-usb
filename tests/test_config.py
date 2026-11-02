@@ -47,3 +47,21 @@ def test_invalid_port():
 def test_invalid_interval():
     with pytest.raises(ConfigError, match="poll_interval_seconds must be at least 1"):
         Settings.from_dict({"poll_interval_seconds": 0})
+
+
+def test_direct_recipient_settings():
+    # 'p' is not valid hex -> raises ConfigError
+    with pytest.raises(ConfigError, match="must be valid hex"):
+        Settings.from_dict({"direct_recipient_pubkey": "4b2116p11398"})
+
+    # Valid hex
+    valid_s = Settings.from_dict({
+        "direct_recipient_pubkey": "4b2116fa9812",
+        "direct_recipient_name": "Operator Node",
+    })
+    assert valid_s.direct_recipient_pubkey == "4b2116fa9812"
+    assert valid_s.direct_recipient_name == "Operator Node"
+
+    # Hex too short (< 12 chars / 6 bytes)
+    with pytest.raises(ConfigError, match="at least 6 bytes"):
+        Settings.from_dict({"direct_recipient_pubkey": "4b2116"})

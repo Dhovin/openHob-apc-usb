@@ -21,6 +21,15 @@
   const elEventsBody = document.getElementById("events-body");
   const elDriverType = document.getElementById("driver-type");
 
+  // Recipient elements
+  const elRecipientBadge = document.getElementById("recipient-badge");
+  const elContactSelect = document.getElementById("contact-select");
+  const elRecipientPubkey = document.getElementById("recipient-pubkey");
+  const elRecipientLabel = document.getElementById("recipient-label");
+  const elSaveRecipientBtn = document.getElementById("save-recipient-btn");
+  const elTestDmBtn = document.getElementById("test-dm-btn");
+  const elRecipientFeedback = document.getElementById("recipient-feedback");
+
   // Notice banner elements
   const elNoticeBanner = document.getElementById("notice-banner");
   const elNoticeIcon = document.getElementById("notice-icon");
@@ -264,6 +273,195 @@
     }
 
     updateEvents(data.events);
+
+    // Direct recipient status
+    if (data.meshcore) {
+      const pubkey = data.meshcore.direct_recipient_pubkey;
+      const name = data.meshcore.direct_recipient_name;
+      if (pubkey && elRecipientBadge) {
+        const shortHex = pubkey.length > 8 ? `${pubkey.slice(0, 8)}...` : pubkey;
+        elRecipientBadge.textContent = `Encrypted to ${name || shortHex}`;
+        elRecipientBadge.className = "badge online";
+        if (elRecipientPubkey && !elRecipientPubkey.value) {
+          elRecipientPubkey.value = pubkey;
+        }
+        if (elRecipientLabel && !elRecipientLabel.value && name) {
+          elRecipientLabel.value = name;
+        }
+      } else if (elRecipientBadge) {
+        elRecipientBadge.textContent = "No Recipient (Alerts Muted)";
+        elRecipientBadge.className = "badge offline";
+      }
+    }
+  }
+
+  function showFeedback(msg, isSuccess = true) {
+    if (!elRecipientFeedback) return;
+    elRecipientFeedback.textContent = msg;
+    elRecipientFeedback.className = `action-feedback ${isSuccess ? "success" : "error"}`;
+    elRecipientFeedback.classList.remove("hidden");
+    setTimeout(() => {
+      if (elRecipientFeedback) {
+        elRecipientFeedback.classList.add("hidden");
+      }
+    }, 4500);
+  }
+
+  async function loadContacts() {
+    if (!elContactSelect) return;
+    try {
+      const resp = await apiFetch("/api/companion/contacts");
+      if (!resp.ok) {
+        elContactSelect.innerHTML = `<option value="">-- No companion contacts loaded (enter hex below) --</option>`;
+        return;
+      }
+      const res = await resp.json();
+      const contacts = Array.isArray(res) ? res : (res && Array.isArray(res.data) ? res.data : []);
+      if (contacts.length === 0) {
+        elContactSelect.innerHTML = `<option value="">-- No contacts found in MeshCore (enter hex below) --</option>`;
+        return;
+      }
+
+      let options = `<option value="">-- Choose a MeshCore Contact --</option>`;
+      for (const c of contacts) {
+        const pk = c.public_key || "";
+        const name = c.name || "Unknown";
+        const short = pk.length > 8 ? `${pk.slice(0, 8)}...` : pk;
+        options += `<option value="${pk}" data-name="${name}">${name} (${short})</option>`;
+      }
+      options += `<option value="__custom__">Manual Node Hex Input</option>`;
+      elContactSelect.innerHTML = options;
+
+      // If pubkey already entered, match option
+      if (elRecipientPubkey && elRecipientPubkey.value) {
+        const cur = elRecipientPubkey.value.toLowerCase().trim();
+        for (const opt of elContactSelect.options) {
+          if (opt.value.toLowerCase() === cur) {
+            opt.selected = true;
+            break;
+          }
+        }
+      }
+    } catch (_) {
+      elContactSelect.innerHTML = `<option value="">-- Enter hex below --</option>`;
+    }
+  }
+
+  // Recipient selection event listener
+  if (elContactSelect) {
+    elContactSelect.addEventListener("change", () => {
+      const val = elContactSelect.value;
+      if (val && val !== "__custom__") {
+        if (elRecipientPubkey) elRecipientPubkey.value = val;
+        const selOpt = elContactSelect.selectedOptions[0];
+        const name = selOpt ? selOpt.getAttribute("data-name") : "";
+        if (elRecipientLabel && name) elRecipientLabel.value = name;
+      } else if (val === "__custom__") {
+        if (elRecipientPubkey) {
+          elRecipientPubkey.value = "";
+          elRecipientPubkey.focus();
+        }
+        if (elRecipientLabel) elRecipientLabel.value = "";
+      }
+    });
+  }
+
+  // Save recipient button handler
+  if (elSaveRecipientBtn) {
+    elSaveRecipientBtn.addEventListener("click", async () => {
+      const pubkey = elRecipientPubkey ? elRecipientPubkey.value.trim().toLowerCase() : "";
+      const name = elRecipientLabel ? elRecipientLabel.value.trim() : "";
+
+      if (pubkey && (!/^[0-9a-fA-F]+$/.test(pubkey) || pubkey.length < 12)) {
+        showFeedback("Recipient pubkey must be at least 12 hex characters (6 bytes)", false);
+        return;
+      }
+
+      elSaveRecipientBtn.disabled = true;
+      showFeedback("Saving recipient...", true);
+
+      try {
+        let currentCfg = {};
+        const getResp = await apiFetch(SETTINGS_API);
+        if (getResp.ok) {
+          const sJson = await getResp.json();
+          currentCfg = (sJson && sJson.config) ? sJson.config : sJson;
+        }
+
+        currentCfg.direct_recipient_pubkey = pubkey || null;
+        currentCfg.direct_recipient_name = name || null;
+        delete currentCfg._runtime;
+
+        const postResp = await apiFetch("/api/plugins/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: "openhop.apcups",
+            config: currentCfg,
+            restart: true,
+          }),
+        });
+
+        if (postResp.ok) {
+          showFeedback(pubkey ? "Encrypted recipient saved and active!" : "Recipient cleared. Alerts muted.", true);
+          if (elRecipientBadge) {
+            if (pubkey) {
+              const shortHex = pubkey.length > 8 ? `${pubkey.slice(0, 8)}...` : pubkey;
+              elRecipientBadge.textContent = `Encrypted to ${name || shortHex}`;
+              elRecipientBadge.className = "badge online";
+            } else {
+              elRecipientBadge.textContent = "No Recipient (Alerts Muted)";
+              elRecipientBadge.className = "badge offline";
+            }
+          }
+        } else {
+          showFeedback("Failed to save recipient to openHop settings", false);
+        }
+      } catch (err) {
+        showFeedback(`Save error: ${err.message}`, false);
+      } finally {
+        elSaveRecipientBtn.disabled = false;
+      }
+    });
+  }
+
+  // Test DM button handler
+  if (elTestDmBtn) {
+    elTestDmBtn.addEventListener("click", async () => {
+      const pubkey = elRecipientPubkey ? elRecipientPubkey.value.trim().toLowerCase() : "";
+      const name = elRecipientLabel ? elRecipientLabel.value.trim() : "Operator";
+
+      if (!pubkey) {
+        showFeedback("Select or enter a recipient public key first", false);
+        return;
+      }
+
+      elTestDmBtn.disabled = true;
+      showFeedback("Transmitting test encrypted direct message...", true);
+
+      try {
+        const testText = `[UPS TEST] Encrypted alert test from openHop APC UPS Monitor to ${name}. Power alerts are configured!`;
+        const resp = await apiFetch("/api/companion/send_text", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            pub_key: pubkey,
+            text: testText,
+          }),
+        });
+
+        if (resp.ok) {
+          showFeedback(`Encrypted test DM sent to ${name}!`, true);
+        } else {
+          const errData = await resp.json().catch(() => ({}));
+          showFeedback(`Test failed: ${errData.error || errData.message || "Companion unreachable"}`, false);
+        }
+      } catch (err) {
+        showFeedback(`Network error: ${err.message}`, false);
+      } finally {
+        elTestDmBtn.disabled = false;
+      }
+    });
   }
 
   // Setup command copy button
@@ -288,4 +486,5 @@
   // Initial fetch and interval
   fetchTelemetry();
   setInterval(fetchTelemetry, POLL_INTERVAL_MS);
+  loadContacts();
 })();

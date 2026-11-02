@@ -37,6 +37,8 @@ class Settings:
     telemetry_beacon_interval_seconds: int = 3600
     respond_to_queries: bool = True
     query_trigger_words: tuple[str, ...] = ("!ups", "/ups", "ups", "ups status")
+    direct_recipient_pubkey: str | None = None
+    direct_recipient_name: str | None = None
     log_level: str = "INFO"
 
     @classmethod
@@ -99,6 +101,23 @@ class Settings:
         if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             log_level = "INFO"
 
+        direct_recipient_pubkey = data.get("direct_recipient_pubkey")
+        if direct_recipient_pubkey is not None:
+            direct_recipient_pubkey = str(direct_recipient_pubkey).strip().lower()
+            if not direct_recipient_pubkey:
+                direct_recipient_pubkey = None
+            else:
+                try:
+                    bytes.fromhex(direct_recipient_pubkey)
+                except ValueError:
+                    raise ConfigError(f"Invalid direct_recipient_pubkey '{direct_recipient_pubkey}': must be valid hex")
+                if len(direct_recipient_pubkey) < 12:
+                    raise ConfigError("direct_recipient_pubkey must be at least 6 bytes (12 hex characters)")
+
+        direct_recipient_name = data.get("direct_recipient_name")
+        if direct_recipient_name is not None:
+            direct_recipient_name = str(direct_recipient_name).strip() or None
+
         return cls(
             driver=driver,
             poll_interval_seconds=poll_interval,
@@ -119,6 +138,8 @@ class Settings:
             telemetry_beacon_interval_seconds=telemetry_beacon_interval,
             respond_to_queries=respond_to_queries,
             query_trigger_words=query_trigger_words,
+            direct_recipient_pubkey=direct_recipient_pubkey,
+            direct_recipient_name=direct_recipient_name,
             log_level=log_level,
         )
 

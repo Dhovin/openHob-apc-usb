@@ -18,5 +18,7 @@
   "telemetry_beacon_interval_seconds": 3600,
   "respond_to_queries": true,
   "query_trigger_words": ["!ups", "/ups", "ups", "ups status"],
+  "direct_recipient_pubkey": null,
+  "direct_recipient_name": null,
   "log_level": "INFO"
 }

@@ -53,6 +53,8 @@ class RuntimeWriter:
                 "host": settings.meshcore_host,
                 "port": settings.meshcore_port,
                 "channel_idx": settings.meshcore_channel_idx,
+                "direct_recipient_pubkey": settings.direct_recipient_pubkey,
+                "direct_recipient_name": settings.direct_recipient_name,
             },
             "apcupsd": {
                 "installed": is_apcupsd_installed(),
