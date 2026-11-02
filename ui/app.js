@@ -79,8 +79,8 @@
         return `
           <tr>
             <td>${formatTime(ev.timestamp)}</td>
-            <td><strong>${ev.event.replace("_", " ").toUpperCase()}</strong></td>
-            <td>${ev.message}</td>
+            <td><strong>${(ev.event || "").replace("_", " ").toUpperCase()}</strong></td>
+            <td>${ev.message || "-"}</td>
             <td>${ev.battery_pct !== undefined ? ev.battery_pct + "%" : "-"}</td>
           </tr>
         `;
@@ -96,24 +96,31 @@
       if (!resp.ok) {
         throw new Error(`HTTP ${resp.status}`);
       }
-      const data = await resp.json();
-      render(data);
+      const raw = await resp.json();
+      render(raw);
     } catch (err) {
-      // If endpoint is not available (e.g. static UI preview or service starting)
       console.debug("Runtime API poll error:", err.message);
     }
   }
 
-  function render(data) {
-    if (!data) return;
+  function render(raw) {
+    if (!raw) return;
+
+    // openHop manager wraps plugin runtime under raw.runtime
+    const data = raw.runtime || raw;
 
     // MeshCore indicator
-    if (data.meshcore && data.meshcore.connected) {
-      elMeshDot.classList.add("connected");
-      elMeshLabel.textContent = `MeshCore (Port ${data.meshcore.port})`;
+    if (data.meshcore && data.meshcore.enabled) {
+      if (data.meshcore.connected) {
+        elMeshDot.classList.add("connected");
+        elMeshLabel.textContent = `MeshCore (Port ${data.meshcore.port})`;
+      } else {
+        elMeshDot.classList.remove("connected");
+        elMeshLabel.textContent = "MeshCore Disconnected (Radio Optional)";
+      }
     } else {
       elMeshDot.classList.remove("connected");
-      elMeshLabel.textContent = "MeshCore Disconnected";
+      elMeshLabel.textContent = "Radio Alerts Disabled";
     }
 
     const ups = data.ups;
@@ -122,10 +129,10 @@
       updateStatusBadge(ups.status_enum, ups.status);
       updateBatteryUI(ups.battery_charge_pct, ups.time_left_minutes);
 
-      elLineVoltage.textContent = ups.line_voltage ? `${ups.line_voltage.toFixed(1)} V` : "0.0 V";
-      elLoadPct.textContent = `${ups.load_pct ? ups.load_pct.toFixed(1) : 0}%`;
-      elBatteryVoltage.textContent = ups.battery_voltage ? `${ups.battery_voltage.toFixed(1)} V` : "-- V";
-      elInternalTemp.textContent = ups.internal_temp_c ? `${ups.internal_temp_c.toFixed(1)} C` : "N/A";
+      elLineVoltage.textContent = (ups.line_voltage !== null && ups.line_voltage !== undefined) ? `${ups.line_voltage.toFixed(1)} V` : "-- V";
+      elLoadPct.textContent = (ups.load_pct !== null && ups.load_pct !== undefined) ? `${ups.load_pct.toFixed(1)}%` : "--%";
+      elBatteryVoltage.textContent = (ups.battery_voltage !== null && ups.battery_voltage !== undefined) ? `${ups.battery_voltage.toFixed(1)} V` : "-- V";
+      elInternalTemp.textContent = (ups.internal_temp_c !== null && ups.internal_temp_c !== undefined) ? `${ups.internal_temp_c.toFixed(1)} C` : "N/A";
       elDriverType.textContent = (ups.driver_type || "auto").toUpperCase();
     }
 

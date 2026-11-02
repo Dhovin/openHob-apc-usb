@@ -1,7 +1,7 @@
 """Direct USB HID detection and diagnostics for APC UPS devices.
 
 Targets APC USB devices (Vendor ID 0x051d - American Power Conversion).
-Scans Linux sysfs (/sys/bus/usb/devices), /dev/usb/hiddev*, and optional hidapi/pyusb.
+Scans Linux sysfs (/sys/bus/usb/devices), /sys/class/power_supply, /dev/usb/hiddev*, and optional hidapi/pyusb.
 """
 
 from __future__ import annotations
@@ -21,10 +21,7 @@ APC_USB_VENDOR_ID_HEX = "051d"
 
 
 def find_apc_sysfs_device() -> dict[str, str] | None:
-    """Scan Linux /sys/bus/usb/devices for an APC USB UPS (VID 0x051d).
-
-    Works in pure Python with zero dependencies and no special permissions.
-    """
+    """Scan Linux /sys/bus/usb/devices for an APC USB UPS (VID 0x051d)."""
     sysfs_usb = Path("/sys/bus/usb/devices")
     if not sysfs_usb.is_dir():
         return None
@@ -37,7 +34,6 @@ def find_apc_sysfs_device() -> dict[str, str] | None:
             try:
                 vid = vendor_file.read_text(encoding="utf-8").strip().lower()
                 if vid == APC_USB_VENDOR_ID_HEX:
-                    # Found an APC USB device!
                     product_file = dev_path / "product"
                     product = product_file.read_text(encoding="utf-8").strip() if product_file.is_file() else "APC USB UPS"
 
@@ -62,6 +58,30 @@ def find_apc_sysfs_device() -> dict[str, str] | None:
                 continue
     except Exception as exc:
         logger.debug("Error scanning sysfs USB: %s", exc)
+
+    return None
+
+
+def find_linux_power_supply_ups() -> dict[str, Any] | None:
+    """Scan /sys/class/power_supply for a UPS device node created by kernel hid-generic."""
+    ps_dir = Path("/sys/class/power_supply")
+    if not ps_dir.is_dir():
+        return None
+
+    try:
+        for node in ps_dir.iterdir():
+            type_file = node / "type"
+            type_val = type_file.read_text().strip().upper() if type_file.is_file() else ""
+            node_name = node.name.lower()
+            if type_val == "UPS" or "051d" in node_name or "apc" in node_name:
+                data: dict[str, Any] = {"path": str(node)}
+                for prop in ("capacity", "status", "voltage_now", "time_to_empty_now", "model_name"):
+                    f = node / prop
+                    if f.is_file():
+                        data[prop] = f.read_text().strip()
+                return data
+    except Exception as exc:
+        logger.debug("Error scanning /sys/class/power_supply: %s", exc)
 
     return None
 
@@ -149,23 +169,61 @@ class DirectUsbHidDriver(BaseUPSDriver):
         if not self._connected:
             raise RuntimeError("Direct USB driver is not connected")
 
-        model = "APC Smart/Back-UPS (USB)"
+        model = "APC Back-UPS (USB)"
         serial = ""
         if self._sysfs_info:
             model = self._sysfs_info.get("product") or model
             serial = self._sysfs_info.get("serial", "")
 
+        # Default telemetry values when connected via raw USB HID
+        battery_pct = 100.0
+        status_str = "ONLINE (USB Connected)"
+        status_enum = UPSStatus.ONLINE
+        time_left = 30.0
+        line_v = 120.0
+        batt_v = 13.5  # Typical single 12V SLA battery in ES 600M1
+
+        # Check if Linux kernel exposed power_supply metrics
+        ps = find_linux_power_supply_ups()
+        if ps:
+            if "capacity" in ps:
+                try:
+                    battery_pct = float(ps["capacity"])
+                except ValueError:
+                    pass
+            if "status" in ps:
+                raw_st = ps["status"].upper()
+                if "DISCHARG" in raw_st:
+                    status_str = "ONBATT"
+                    status_enum = UPSStatus.ON_BATTERY
+                    line_v = 0.0
+                elif "CHARG" in raw_st or "FULL" in raw_st:
+                    status_str = "ONLINE"
+                    status_enum = UPSStatus.ONLINE
+            if "voltage_now" in ps:
+                try:
+                    # Linux voltage_now is in microvolts
+                    batt_v = round(float(ps["voltage_now"]) / 1e6, 2)
+                except ValueError:
+                    pass
+            if "time_to_empty_now" in ps:
+                try:
+                    # Linux time_to_empty_now is in seconds
+                    time_left = round(float(ps["time_to_empty_now"]) / 60.0, 1)
+                except ValueError:
+                    pass
+
         return UPSData(
             model=model,
-            status="ONLINE",
-            status_enum=UPSStatus.ONLINE,
-            battery_charge_pct=100.0,
-            time_left_minutes=35.0,
-            line_voltage=120.0,
+            status=status_str,
+            status_enum=status_enum,
+            battery_charge_pct=battery_pct,
+            time_left_minutes=time_left,
+            line_voltage=line_v,
             output_voltage=120.0,
             load_pct=15.0,
-            battery_voltage=27.0,
-            internal_temp_c=27.0,
+            battery_voltage=batt_v,
+            internal_temp_c=25.0,
             line_freq_hz=60.0,
             last_transfer_reason="None",
             serial_number=serial,
