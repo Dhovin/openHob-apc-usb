@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "id": "openhop.apcups",
+  "name": "APC UPS Monitor",
+  "version": "1.0.0",
+  "description": "Monitors an APC UPS via USB, tracks battery & power telemetry, and broadcasts alerts over MeshCore radio.",
+  "runtime": {
+    "type": "python",
+    "entrypoint": "openhop-apc-ups"
+  },
+  "ui": {
+    "type": "application",
+    "entry": "ui/index.html"
+  },
+  "config": {
+    "defaults": {
+      "driver": "auto",
+      "poll_interval_seconds": 10,
+      "nis_host": "127.0.0.1",
+      "nis_port": 3551,
+      "usb_vendor_id": "051d",
+      "usb_device_path": null,
+      "simulation_mode": false,
+      "meshcore_enabled": true,
+      "meshcore_host": "127.0.0.1",
+      "meshcore_port": 5050,
+      "meshcore_channel_idx": 0,
+      "alert_on_power_loss": true,
+      "alert_on_power_restore": true,
+      "alert_on_low_battery": true,
+      "low_battery_threshold_percent": 25,
+      "low_battery_threshold_minutes": 10,
+      "telemetry_beacon_interval_seconds": 3600,
+      "respond_to_queries": true,
+      "query_trigger_words": ["!ups", "/ups", "ups", "ups status"],
+      "log_level": "INFO"
+    }
+  }
+}

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>APC UPS - openHop MeshCore</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="title-area">
+        <h1>
+          <span>⚡</span>
+          <span id="ups-model">APC UPS Monitor</span>
+          <span id="status-badge" class="badge offline">Offline</span>
+        </h1>
+      </div>
+      <div class="header-status">
+        <div class="mesh-status">
+          <div id="mesh-dot" class="dot"></div>
+          <span id="mesh-label">MeshCore Disconnected</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Battery Status Hero Card -->
+    <div class="hero-card">
+      <div class="gauge-section">
+        <h3>Battery State</h3>
+        <div class="charge-row">
+          <div id="battery-charge" class="charge-value">--%</div>
+          <div class="charge-label">Charge Remaining</div>
+        </div>
+        <div class="progress-bar-container">
+          <div id="progress-bar" class="progress-bar"></div>
+        </div>
+      </div>
+      <div class="runtime-section">
+        <h3>Estimated Runtime</h3>
+        <div id="time-left" class="runtime-value">-- min</div>
+      </div>
+    </div>
+
+    <!-- Power & Electrical Metrics Grid -->
+    <div class="grid">
+      <div class="card">
+        <div class="card-title">Utility Input</div>
+        <div id="line-voltage" class="card-value">-- V</div>
+        <div class="card-subtext">AC Line Voltage</div>
+      </div>
+      <div class="card">
+        <div class="card-title">UPS Load</div>
+        <div id="load-pct" class="card-value">-- %</div>
+        <div class="card-subtext">Current Power Draw</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Battery Voltage</div>
+        <div id="battery-voltage" class="card-value">-- V</div>
+        <div class="card-subtext">Internal DC Bus</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Temperature</div>
+        <div id="internal-temp" class="card-value">-- C</div>
+        <div class="card-subtext">Internal Sensor</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Active Driver</div>
+        <div id="driver-type" class="card-value">AUTO</div>
+        <div class="card-subtext">Connection Subsystem</div>
+      </div>
+    </div>
+
+    <!-- Power Events Table -->
+    <div class="section-title">
+      <span>📋</span>
+      <span>Recent Power Events</span>
+    </div>
+    <div class="events-card">
+      <table class="events-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Event</th>
+            <th>Details</th>
+            <th>Battery</th>
+          </tr>
+        </thead>
+        <tbody id="events-body">
+          <tr>
+            <td colspan="4" class="empty-state">Waiting for telemetry data...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

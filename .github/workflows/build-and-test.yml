@@ -1,0 +1,41 @@
+name: Build & Test Plugin Wheel
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install setuptools wheel build pytest pytest-asyncio openhop-core
+
+      - name: Run unit tests
+        run: |
+          python -m pytest
+
+      - name: Build plugin wheel
+        run: |
+          python -m build --wheel
+
+      - name: Validate built wheel
+        run: |
+          python validate_wheel.py
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openhop-apcups-plugin-wheel
+          path: dist/*.whl

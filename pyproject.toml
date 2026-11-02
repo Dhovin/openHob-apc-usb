@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openhop-apcups-plugin"
+version = "1.0.0"
+description = "openHop MeshCore service plugin for APC UPS USB monitoring, telemetry, and alerts"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "openHop Community" }
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Operating System :: POSIX :: Linux",
+  "Topic :: Communications :: Ham Radio",
+  "Topic :: System :: Monitoring"
+]
+dependencies = [
+  "openhop-core>=1.1.1"
+]
+
+[project.optional-dependencies]
+usb = [
+  "pyusb>=1.2.1",
+  "hidapi>=0.14.0"
+]
+dev = [
+  "pytest>=8.0.0",
+  "pytest-asyncio>=0.23.0",
+  "build>=1.0.0",
+  "wheel"
+]
+
+[project.scripts]
+openhop-apc-ups = "openhop_apc_ups.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["openhop_apc_ups*"]
+
+[tool.setuptools.data-files]
+"share/openhop/plugins/openhop.apcups" = [
+  "openhop-plugin.json",
+  "config.default.json"
+]
+"share/openhop/plugins/openhop.apcups/ui" = [
+  "ui/index.html",
+  "ui/app.js",
+  "ui/styles.css"
+]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-v"
+testpaths = ["tests"]
+asyncio_mode = "auto"
