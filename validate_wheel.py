@@ -8,12 +8,14 @@ from zipfile import ZipFile
 
 
 def validate() -> None:
-    wheels = glob.glob("dist/openhop_apcups_plugin-*.whl")
-    if not wheels:
-        print("ERROR: No wheel found in dist/. Run 'python -m build --wheel' first.")
-        sys.exit(1)
-
-    wheel_path = Path(wheels[0])
+    if len(sys.argv) > 1:
+        wheel_path = Path(sys.argv[1])
+    else:
+        wheels = sorted(glob.glob("dist/openhop_apcups_plugin-*.whl"), key=lambda p: Path(p).stat().st_mtime, reverse=True)
+        if not wheels:
+            print("ERROR: No wheel found in dist/. Run 'python -m build --wheel' first.")
+            sys.exit(1)
+        wheel_path = Path(wheels[0])
     print(f"Validating {wheel_path.name} against openHop Repeater contracts...")
 
     with ZipFile(wheel_path) as archive:

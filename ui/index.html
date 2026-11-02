@@ -24,6 +24,19 @@
       </div>
     </header>
 
+    <!-- Turnkey Notice / Setup Helper Banner -->
+    <div id="notice-banner" class="notice-banner hidden">
+      <div class="notice-icon" id="notice-icon">ℹ️</div>
+      <div class="notice-content">
+        <strong id="notice-title">Turnkey Setup Available</strong>
+        <p id="notice-msg">APC USB hardware detected. For live battery telemetry, apcupsd is recommended.</p>
+        <div id="notice-cmd-box" class="cmd-box hidden">
+          <code id="notice-cmd">sudo apt update && sudo apt install -y apcupsd && sudo sed -i 's/ISCONFIGURED=no/ISCONFIGURED=yes/' /etc/default/apcupsd && sudo systemctl restart apcupsd</code>
+          <button id="copy-cmd-btn" class="btn-copy" type="button">Copy</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Battery Status Hero Card -->
     <div class="hero-card">
       <div class="gauge-section">

@@ -127,7 +127,7 @@ class UpsMonitor:
         """Fetch status and trigger any state change events."""
         if self.driver is None:
             await self.initialize_driver()
-        elif isinstance(self.driver, DirectUsbHidDriver) and (time.time() - self._last_nis_probe > 30.0):
+        elif isinstance(self.driver, DirectUsbHidDriver) and (time.time() - self._last_nis_probe > 10.0):
             self._last_nis_probe = time.time()
             nis = ApcNisClient(host=self.settings.nis_host, port=self.settings.nis_port)
             if await nis.connect():

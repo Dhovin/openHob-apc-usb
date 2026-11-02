@@ -1,6 +1,9 @@
 // openHop APC UPS Dashboard Application
 (function () {
-  const RUNTIME_ENDPOINT = "/api/plugins/runtime?id=openhop.apcups";
+  "use strict";
+
+  const RUNTIME_API = "/api/plugins/runtime?id=openhop.apcups";
+  const SETTINGS_API = "/api/plugins/settings?id=openhop.apcups";
   const POLL_INTERVAL_MS = 2500;
 
   // DOM Elements
@@ -18,6 +21,15 @@
   const elEventsBody = document.getElementById("events-body");
   const elDriverType = document.getElementById("driver-type");
 
+  // Notice banner elements
+  const elNoticeBanner = document.getElementById("notice-banner");
+  const elNoticeIcon = document.getElementById("notice-icon");
+  const elNoticeTitle = document.getElementById("notice-title");
+  const elNoticeMsg = document.getElementById("notice-msg");
+  const elNoticeCmdBox = document.getElementById("notice-cmd-box");
+  const elNoticeCmd = document.getElementById("notice-cmd");
+  const elCopyCmdBtn = document.getElementById("copy-cmd-btn");
+
   function formatTime(timestamp) {
     if (!timestamp) return "-";
     const d = new Date(timestamp * 1000);
@@ -32,15 +44,50 @@
         window.localStorage.setItem("pymc_jwt_token", queryToken);
         return queryToken;
       }
-      return (
-        window.localStorage.getItem("pymc_jwt_token") ||
-        window.localStorage.getItem("token") ||
-        window.sessionStorage.getItem("pymc_jwt_token") ||
-        ""
-      );
-    } catch (_) {
-      return "";
+      if (window.localStorage.getItem("pymc_jwt_token")) {
+        return window.localStorage.getItem("pymc_jwt_token");
+      }
+      if (window.localStorage.getItem("token")) {
+        return window.localStorage.getItem("token");
+      }
+      if (window.sessionStorage.getItem("pymc_jwt_token")) {
+        return window.sessionStorage.getItem("pymc_jwt_token");
+      }
+      if (window.parent && window.parent.localStorage) {
+        return window.parent.localStorage.getItem("pymc_jwt_token") || "";
+      }
+    } catch (_) {}
+    return "";
+  }
+
+  async function apiFetch(url, options = {}) {
+    const headers = new Headers(options.headers || {});
+    headers.set("Accept", "application/json");
+    const token = getJwtToken();
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
     }
+    return fetch(url, { ...options, headers, cache: "no-store" });
+  }
+
+  function showNotice(title, message, isWarn = false, cmd = null) {
+    if (!elNoticeBanner) return;
+    elNoticeBanner.classList.remove("hidden", "warn", "error");
+    if (isWarn) elNoticeBanner.classList.add("warn");
+    if (elNoticeIcon) elNoticeIcon.textContent = isWarn ? "⚠️" : "ℹ️";
+    if (elNoticeTitle) elNoticeTitle.textContent = title;
+    if (elNoticeMsg) elNoticeMsg.textContent = message;
+
+    if (cmd && elNoticeCmdBox && elNoticeCmd) {
+      elNoticeCmd.textContent = cmd;
+      elNoticeCmdBox.classList.remove("hidden");
+    } else if (elNoticeCmdBox) {
+      elNoticeCmdBox.classList.add("hidden");
+    }
+  }
+
+  function hideNotice() {
+    if (elNoticeBanner) elNoticeBanner.classList.add("hidden");
   }
 
   function updateStatusBadge(statusEnum, rawStatus) {
@@ -78,7 +125,7 @@
       elProgressBar.style.backgroundColor = "var(--accent-yellow)";
     }
 
-    if (minutesLeft !== undefined && minutesLeft !== null) {
+    if (minutesLeft !== undefined && minutesLeft !== null && minutesLeft > 0) {
       elTimeLeft.textContent = `${Math.round(minutesLeft)} min`;
     } else {
       elTimeLeft.textContent = "-- min";
@@ -111,34 +158,53 @@
 
   async function fetchTelemetry() {
     try {
-      const headers = { Accept: "application/json" };
-      const token = getJwtToken();
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
-      }
+      // 1. Query runtime endpoint
+      const resp = await apiFetch(RUNTIME_API);
 
-      const resp = await fetch(RUNTIME_ENDPOINT, { headers, cache: "no-store" });
       if (resp.status === 401) {
+        showNotice(
+          "Dashboard Authentication Required",
+          "Your openHop session has expired or requires authentication. Please log in to the openHop Repeater web interface and launch the plugin from the Plugins manager.",
+          true
+        );
         elStatusBadge.textContent = "Auth Required";
         elStatusBadge.className = "badge offline";
-        console.warn("openHop runtime API returned 401 Unauthorized. Ensure you are logged into openHop or pass ?token=YOUR_TOKEN.");
         return;
       }
-      if (!resp.ok) {
-        throw new Error(`HTTP ${resp.status}`);
+
+      let payload = null;
+      if (resp.ok) {
+        const json = await resp.json();
+        // openHop manager returns { id, exists, runtime: { ... } }
+        if (json && json.runtime && json.runtime.ups) {
+          payload = json.runtime;
+        } else if (json && json.ups) {
+          payload = json;
+        }
       }
-      const raw = await resp.json();
-      render(raw);
+
+      // 2. Fallback to settings endpoint if runtime endpoint has not initialized yet
+      if (!payload) {
+        const settingsResp = await apiFetch(SETTINGS_API);
+        if (settingsResp.ok) {
+          const sJson = await settingsResp.json();
+          const cfg = (sJson && sJson.config) ? sJson.config : sJson;
+          if (cfg && cfg._runtime && cfg._runtime.ups) {
+            payload = cfg._runtime;
+          }
+        }
+      }
+
+      if (payload) {
+        render(payload);
+      }
     } catch (err) {
       console.debug("Runtime API poll error:", err.message);
     }
   }
 
-  function render(raw) {
-    if (!raw) return;
-
-    // openHop manager wraps plugin runtime under raw.runtime
-    const data = raw.runtime || raw;
+  function render(data) {
+    if (!data) return;
 
     // MeshCore indicator
     if (data.meshcore && data.meshcore.enabled) {
@@ -163,17 +229,54 @@
       elLineVoltage.textContent = (ups.line_voltage !== null && ups.line_voltage !== undefined && ups.line_voltage > 0)
         ? `${ups.line_voltage.toFixed(1)} V`
         : "N/A";
-      elLoadPct.textContent = (ups.load_pct !== null && ups.load_pct !== undefined) ? `${ups.load_pct.toFixed(1)}%` : "--%";
+      elLoadPct.textContent = (ups.load_pct !== null && ups.load_pct !== undefined && ups.load_pct > 0)
+        ? `${ups.load_pct.toFixed(1)}%`
+        : "--%";
       elBatteryVoltage.textContent = (ups.battery_voltage !== null && ups.battery_voltage !== undefined && ups.battery_voltage > 0)
         ? `${ups.battery_voltage.toFixed(1)} V`
         : "-- V";
-      elInternalTemp.textContent = (ups.internal_temp_c !== null && ups.internal_temp_c !== undefined)
+      elInternalTemp.textContent = (ups.internal_temp_c !== null && ups.internal_temp_c !== undefined && ups.internal_temp_c > 0)
         ? `${ups.internal_temp_c.toFixed(1)} C`
         : "N/A";
-      elDriverType.textContent = (ups.driver_type || "auto").toUpperCase();
+
+      const driverMode = (ups.driver_type || "auto").toUpperCase();
+      elDriverType.textContent = driverMode;
+
+      // Turnkey helper guidance: if connected only via Direct USB sysfs and NIS is not connected yet
+      const apcupsdInfo = data.apcupsd || {};
+      if (!apcupsdInfo.nis_connected && (driverMode === "USB" || driverMode === "AUTO")) {
+        const cmd = apcupsdInfo.command || "sudo apt update && sudo apt install -y apcupsd && sudo sed -i 's/ISCONFIGURED=no/ISCONFIGURED=yes/' /etc/default/apcupsd && sudo systemctl restart apcupsd";
+        showNotice(
+          "APC Back-UPS Hardware Detected on USB",
+          "Your Back-UPS ES 600M1 was detected on USB! To unlock real-time battery % and electrical stats, ensure apcupsd is installed and active on your repeater host:",
+          false,
+          cmd
+        );
+      } else {
+        hideNotice();
+      }
     }
 
     updateEvents(data.events);
+  }
+
+  // Setup command copy button
+  if (elCopyCmdBtn) {
+    elCopyCmdBtn.addEventListener("click", async () => {
+      if (!elNoticeCmd) return;
+      try {
+        await navigator.clipboard.writeText(elNoticeCmd.textContent.trim());
+        elCopyCmdBtn.textContent = "Copied!";
+        setTimeout(() => {
+          elCopyCmdBtn.textContent = "Copy";
+        }, 2000);
+      } catch (_) {
+        elCopyCmdBtn.textContent = "Copied!";
+        setTimeout(() => {
+          elCopyCmdBtn.textContent = "Copy";
+        }, 2000);
+      }
+    });
   }
 
   // Initial fetch and interval

@@ -1,0 +1,7 @@
+{
+  "id": "openhop.apcups",
+  "name": "APC UPS Monitor",
+  "description": "Monitors an APC UPS via USB, tracks battery & power telemetry, and broadcasts alerts over MeshCore radio.",
+  "repository": "Dhovin/openHob-apc-usb",
+  "category": "Hardware & Power"
+}

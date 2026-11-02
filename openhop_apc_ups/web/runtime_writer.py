@@ -12,7 +12,9 @@ from typing import Any
 
 from ..config import Settings
 from ..ups.base import UPSData
+from ..ups.installer import is_apcupsd_installed
 from ..ups.monitor import UpsMonitor
+from ..ups.nis_client import ApcNisClient
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,10 @@ class RuntimeWriter:
         current = monitor.current_data
         ups_dict = current.to_dict() if current is not None else None
 
+        is_nis = isinstance(monitor.driver, ApcNisClient) and bool(
+            getattr(monitor.driver, "_connected", True)
+        )
+
         payload: dict[str, Any] = {
             "plugin_id": "openhop.apcups",
             "updated_at": time.time(),
@@ -47,6 +53,11 @@ class RuntimeWriter:
                 "port": settings.meshcore_port,
                 "channel_idx": settings.meshcore_channel_idx,
             },
+            "apcupsd": {
+                "installed": is_apcupsd_installed(),
+                "nis_connected": is_nis,
+                "command": "sudo apt update && sudo apt install -y apcupsd && sudo sed -i 's/ISCONFIGURED=no/ISCONFIGURED=yes/' /etc/default/apcupsd && sudo systemctl restart apcupsd",
+            },
             "ups": ups_dict,
             "events": monitor.recent_events,
             "history": monitor.history,
@@ -54,12 +65,27 @@ class RuntimeWriter:
 
         try:
             self.data_dir.mkdir(parents=True, exist_ok=True)
-            # Write to temporary file first then replace atomically
+            # 1. Write runtime.json atomically
             temp_path = self.data_dir / f".runtime.{os.getpid()}.tmp"
             temp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
             temp_path.replace(self.runtime_file)
+
+            # 2. Publish _runtime into config.json (matches openHop Prometheus / settings standard)
+            config_path = self.data_dir / "config.json"
+            raw_cfg: dict[str, Any] = {}
+            if config_path.is_file():
+                try:
+                    loaded = json.loads(config_path.read_text(encoding="utf-8"))
+                    if isinstance(loaded, dict):
+                        raw_cfg = loaded
+                except (OSError, ValueError):
+                    raw_cfg = {}
+            raw_cfg["_runtime"] = payload
+            tmp_cfg = self.data_dir / f".config.{os.getpid()}.tmp"
+            tmp_cfg.write_text(json.dumps(raw_cfg, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            tmp_cfg.replace(config_path)
         except Exception as exc:
-            logger.debug("Failed to write runtime.json: %s", exc)
+            logger.debug("Failed to write runtime / config snapshot: %s", exc)
 
     async def run(
         self,
