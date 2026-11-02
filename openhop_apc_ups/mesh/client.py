@@ -73,7 +73,7 @@ class MeshCoreClient:
 
         if self._reader_task is not None:
             self._reader_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            with contextlib.suppress(asyncio.CancelledError, asyncio.IncompleteReadError, ConnectionError, OSError):
                 await self._reader_task
             self._reader_task = None
 
@@ -320,25 +320,29 @@ class MeshCoreClient:
         if reader is None:
             raise ConnectionError("Reader not initialized")
 
-        while True:
-            prefix = await reader.readexactly(1)
-            if prefix[0] != FRAME_OUTBOUND_PREFIX:
-                raise MeshCoreProtocolError(f"Unexpected frame prefix: {prefix[0]:#x}")
+        try:
+            while True:
+                prefix = await reader.readexactly(1)
+                if prefix[0] != FRAME_OUTBOUND_PREFIX:
+                    raise MeshCoreProtocolError(f"Unexpected frame prefix: {prefix[0]:#x}")
 
-            length_bytes = await reader.readexactly(2)
-            length = struct.unpack("<H", length_bytes)[0]
-            payload = await reader.readexactly(length)
+                length_bytes = await reader.readexactly(2)
+                length = struct.unpack("<H", length_bytes)[0]
+                payload = await reader.readexactly(length)
 
-            if not payload:
-                continue
+                if not payload:
+                    continue
 
-            code = payload[0]
-            if code >= 0x80:
-                if code == PUSH_CODE_MSG_WAITING:
-                    self._message_waiting.set()
-                continue
+                code = payload[0]
+                if code >= 0x80:
+                    if code == PUSH_CODE_MSG_WAITING:
+                        self._message_waiting.set()
+                    continue
 
-            await self._response_queue.put(payload)
+                await self._response_queue.put(payload)
+        except (asyncio.IncompleteReadError, ConnectionError, OSError):
+            # Remote server closed connection or connection reset during shutdown
+            pass
 
     async def _send_command(self, payload: bytes) -> None:
         writer = self._writer

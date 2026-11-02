@@ -55,3 +55,19 @@ def test_runtime_writer_outputs(tmp_path: Path) -> None:
     assert config_data["driver"] == "auto"
     assert "_runtime" in config_data
     assert config_data["_runtime"]["ups"]["battery_charge_pct"] == 95.0
+
+
+async def test_runtime_writer_run_loop(tmp_path: Path) -> None:
+    import asyncio
+    settings = Settings()
+    monitor = UpsMonitor(settings)
+    writer = RuntimeWriter(data_dir=tmp_path)
+    stop_event = asyncio.Event()
+
+    task = asyncio.create_task(writer.run(monitor, False, settings, stop_event, interval=0.01))
+    await asyncio.sleep(0.05)
+    stop_event.set()
+    await task
+
+    runtime_file = tmp_path / "runtime.json"
+    assert runtime_file.is_file()
