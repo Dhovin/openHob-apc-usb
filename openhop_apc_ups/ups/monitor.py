@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
+import struct
 import time
 from collections import deque
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from ..config import Settings
@@ -25,6 +28,39 @@ logger = logging.getLogger(__name__)
 EVENT_POWER_LOST = "power_lost"
 EVENT_POWER_RESTORED = "power_restored"
 EVENT_LOW_BATTERY = "low_battery"
+
+
+def get_nis_candidate_hosts(primary_host: str) -> list[str]:
+    """Return list of candidate hosts to probe for apcupsd NIS daemon.
+
+    Checks primary_host first. If set to localhost/127.0.0.1, also checks Docker host
+    candidates (default bridge gateway from /proc/net/route, 172.17.0.1, host.docker.internal)
+    so plugins running inside containerized openHop can reach the host apcupsd.
+    """
+    hosts = [primary_host]
+    if primary_host in ("127.0.0.1", "localhost"):
+        candidates: list[str] = []
+        try:
+            route_path = Path("/proc/net/route")
+            if route_path.is_file():
+                for line in route_path.read_text().splitlines()[1:]:
+                    fields = line.strip().split()
+                    if len(fields) >= 3 and fields[1] == "00000000":
+                        gw_hex = fields[2]
+                        gw_ip = socket.inet_ntoa(struct.pack("<L", int(gw_hex, 16)))
+                        if gw_ip not in candidates and gw_ip != "0.0.0.0":
+                            candidates.append(gw_ip)
+        except Exception:
+            pass
+
+        for default_cand in ("172.17.0.1", "host.docker.internal"):
+            if default_cand not in candidates:
+                candidates.append(default_cand)
+
+        for c in candidates:
+            if c not in hosts:
+                hosts.append(c)
+    return hosts
 
 
 class UpsMonitor:
@@ -87,21 +123,25 @@ class UpsMonitor:
 
         # "auto" mode: Try NIS first (apcupsd USB), then direct USB, fallback to simulator if nothing responds
         logger.info("Auto-detecting APC UPS connection...")
-        nis = ApcNisClient(host=self.settings.nis_host, port=self.settings.nis_port)
-        if await nis.connect():
-            logger.info("Auto-detection selected APC NIS daemon (apcupsd USB)")
-            self.driver = nis
-            return nis
+        candidate_hosts = get_nis_candidate_hosts(self.settings.nis_host)
+        for cand_host in candidate_hosts:
+            nis = ApcNisClient(host=cand_host, port=self.settings.nis_port)
+            if await nis.connect():
+                logger.info("Auto-detection selected APC NIS daemon at %s:%s (apcupsd USB)", cand_host, self.settings.nis_port)
+                self.driver = nis
+                return nis
 
         # Turnkey helper: try to start or install apcupsd automatically
         logger.info("APC NIS daemon not responding. Running turnkey apcupsd supervisor...")
         success, msg = ensure_turnkey_apcupsd()
         if success:
             logger.info("Turnkey supervisor: %s", msg)
-            if await nis.connect():
-                logger.info("Connected to apcupsd NIS daemon following turnkey setup!")
-                self.driver = nis
-                return nis
+            for cand_host in candidate_hosts:
+                nis = ApcNisClient(host=cand_host, port=self.settings.nis_port)
+                if await nis.connect():
+                    logger.info("Connected to apcupsd NIS daemon at %s:%s following turnkey setup!", cand_host, self.settings.nis_port)
+                    self.driver = nis
+                    return nis
         else:
             logger.debug("Turnkey supervisor notice: %s", msg)
 
@@ -129,10 +169,12 @@ class UpsMonitor:
             await self.initialize_driver()
         elif isinstance(self.driver, DirectUsbHidDriver) and (time.time() - self._last_nis_probe > 10.0):
             self._last_nis_probe = time.time()
-            nis = ApcNisClient(host=self.settings.nis_host, port=self.settings.nis_port)
-            if await nis.connect():
-                logger.info("APC NIS daemon (apcupsd) became available! Switching to live NIS telemetry.")
-                self.driver = nis
+            for cand_host in get_nis_candidate_hosts(self.settings.nis_host):
+                nis = ApcNisClient(host=cand_host, port=self.settings.nis_port)
+                if await nis.connect():
+                    logger.info("APC NIS daemon (apcupsd) became available at %s:%s! Switching to live NIS telemetry.", cand_host, self.settings.nis_port)
+                    self.driver = nis
+                    break
 
         try:
             assert self.driver is not None

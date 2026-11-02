@@ -177,11 +177,13 @@ class DirectUsbHidDriver(BaseUPSDriver):
 
         # Default telemetry values when connected via raw USB HID
         battery_pct = 100.0
-        status_str = "ONLINE (USB Connected)"
+        status_str = "ONLINE (USB Connected - Start apcupsd for live telemetry)"
         status_enum = UPSStatus.ONLINE
         time_left = 30.0
         line_v = 120.0
         batt_v = 13.5  # Typical single 12V SLA battery in ES 600M1
+        load_val = 0.0
+        temp_val = None
 
         # Check if Linux kernel exposed power_supply metrics
         ps = find_linux_power_supply_ups()
@@ -221,9 +223,9 @@ class DirectUsbHidDriver(BaseUPSDriver):
             time_left_minutes=time_left,
             line_voltage=line_v,
             output_voltage=120.0,
-            load_pct=15.0,
+            load_pct=load_val,
             battery_voltage=batt_v,
-            internal_temp_c=25.0,
+            internal_temp_c=temp_val,
             line_freq_hz=60.0,
             last_transfer_reason="None",
             serial_number=serial,

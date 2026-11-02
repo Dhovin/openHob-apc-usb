@@ -125,8 +125,14 @@
       elProgressBar.style.backgroundColor = "var(--accent-yellow)";
     }
 
-    if (minutesLeft !== undefined && minutesLeft !== null && minutesLeft > 0) {
-      elTimeLeft.textContent = `${Math.round(minutesLeft)} min`;
+    if (minutesLeft !== undefined && minutesLeft !== null && minutesLeft >= 0) {
+      if (minutesLeft >= 120) {
+        const hrs = Math.floor(minutesLeft / 60);
+        const mins = Math.round(minutesLeft % 60);
+        elTimeLeft.textContent = `${hrs}h ${mins}m`;
+      } else {
+        elTimeLeft.textContent = `${Math.round(minutesLeft)} min`;
+      }
     } else {
       elTimeLeft.textContent = "-- min";
     }
@@ -229,7 +235,7 @@
       elLineVoltage.textContent = (ups.line_voltage !== null && ups.line_voltage !== undefined && ups.line_voltage > 0)
         ? `${ups.line_voltage.toFixed(1)} V`
         : "N/A";
-      elLoadPct.textContent = (ups.load_pct !== null && ups.load_pct !== undefined && ups.load_pct > 0)
+      elLoadPct.textContent = (ups.load_pct !== null && ups.load_pct !== undefined && ups.load_pct >= 0)
         ? `${ups.load_pct.toFixed(1)}%`
         : "--%";
       elBatteryVoltage.textContent = (ups.battery_voltage !== null && ups.battery_voltage !== undefined && ups.battery_voltage > 0)
@@ -244,7 +250,7 @@
 
       // Turnkey helper guidance: if connected only via Direct USB sysfs and NIS is not connected yet
       const apcupsdInfo = data.apcupsd || {};
-      if (!apcupsdInfo.nis_connected && (driverMode === "USB" || driverMode === "AUTO")) {
+      if (!apcupsdInfo.nis_connected && (driverMode.includes("USB") || driverMode === "AUTO")) {
         const cmd = apcupsdInfo.command || "sudo apt update && sudo apt install -y apcupsd && sudo sed -i 's/ISCONFIGURED=no/ISCONFIGURED=yes/' /etc/default/apcupsd && sudo systemctl restart apcupsd";
         showNotice(
           "APC Back-UPS Hardware Detected on USB",
