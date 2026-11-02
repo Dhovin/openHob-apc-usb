@@ -1,0 +1,99 @@
+name: Release Plugin Wheel
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag (e.g. v1.0.0)"
+        required: true
+        default: "v1.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install setuptools wheel build pytest pytest-asyncio openhop-core
+
+      - name: Run unit tests
+        run: |
+          python -m pytest
+
+      - name: Build plugin wheel
+        run: |
+          python -m build --wheel
+
+      - name: Validate built wheel
+        run: |
+          python validate_wheel.py
+
+      - name: Compute SHA-256 Checksum
+        id: checksum
+        run: |
+          WHEEL=$(ls dist/*.whl | head -n 1)
+          SHA=$(sha256sum "$WHEEL" | awk '{print $1}')
+          WHEEL_NAME=$(basename "$WHEEL")
+          echo "wheel_path=$WHEEL" >> $GITHUB_OUTPUT
+          echo "wheel_name=$WHEEL_NAME" >> $GITHUB_OUTPUT
+          echo "sha256=$SHA" >> $GITHUB_OUTPUT
+          echo "Built $WHEEL_NAME with SHA-256: $SHA"
+
+      - name: Determine Release Tag
+        id: release_tag
+        run: |
+          if [ -n "${{ inputs.tag_name }}" ]; then
+            TAG="${{ inputs.tag_name }}"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="v1.0.0"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release and Upload Wheel
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_tag.outputs.tag }}
+          name: "openHop APC UPS Plugin ${{ steps.release_tag.outputs.tag }}"
+          body: |
+            ### openHop APC UPS Monitor Plugin (`openhop.apcups`)
+
+            Compatible with **openHop Repeater** and **MeshCore**.
+
+            #### Release Assets & Verification:
+            - **Wheel:** `${{ steps.checksum.outputs.wheel_name }}`
+            - **SHA-256 Digest:**
+              ```
+              ${{ steps.checksum.outputs.sha256 }}
+              ```
+
+            #### Installation on openHop Repeater:
+            Download the `.whl` asset below and upload it via the openHop Repeater **Plugins** web dashboard, or via API:
+            ```bash
+            curl -X POST -H "Authorization: Bearer \$TOKEN" \
+              -F "wheel=@${{ steps.checksum.outputs.wheel_name }}" \
+              http://127.0.0.1:8000/api/plugins/install
+            ```
+          files: dist/*.whl
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

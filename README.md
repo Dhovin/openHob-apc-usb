@@ -141,18 +141,35 @@ Settings are managed through the openHop Repeater plugin settings interface or i
 
 ---
 
-## Building and Installing
+## Building, Releases & Where `.whl` Files Are Saved
 
-### 1. Build the Wheel
+### 1. Local Builds
+When building locally with:
 ```bash
-python -m pip install --upgrade build wheel
 python -m build --wheel
 ```
-
-### 2. Validate Wheel Compliance
-```bash
-python validate_wheel.py
+The resulting `.whl` package is saved in your local **`dist/`** directory:
 ```
+dist/openhop_apcups_plugin-1.0.0-py3-none-any.whl
+```
+
+### 2. Automated GitHub Releases & Wheel Publishing
+This repository includes an automated release workflow in [`.github/workflows/release.yml`](.github/workflows/release.yml):
+- **On Tag Push:** Pushing any version tag (e.g. `git tag v1.0.0 && git push origin v1.0.0`) automatically:
+  1. Runs all unit tests.
+  2. Builds the `.whl` package.
+  3. Validates the wheel structure against openHop contracts.
+  4. Computes the cryptographic **SHA-256** digest.
+  5. Publishes a new **GitHub Release** and uploads the `.whl` file as a release asset.
+- **Manual Trigger:** You can also trigger a release directly from the GitHub web interface by going to **Actions** -> **Release Plugin Wheel** -> **Run workflow**, entering the tag name, and clicking Run.
+
+The published wheel URL will be:
+```text
+https://github.com/Dhovin/openHob-apc-usb/releases/download/<tag>/openhop_apcups_plugin-<version>-py3-none-any.whl
+```
+This is the exact URL and SHA-256 digest format expected by the **openHop Plugin Catalogue** (`catalogue.json`).
+
+---
 
 ### 3. Install on openHop Repeater
 
