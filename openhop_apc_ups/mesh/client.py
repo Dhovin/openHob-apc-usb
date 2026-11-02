@@ -90,15 +90,30 @@ class MeshCoreClient:
         on_message: Callable[[IncomingMessage], Awaitable[None]],
         stop_event: asyncio.Event,
     ) -> None:
-        backoff = [1, 2, 5, 10, 20, 30]
+        backoff = [5, 10, 20, 30, 60]
         index = 0
+        logged_not_found = False
 
         while not stop_event.is_set() and not self._stop_requested.is_set():
             try:
                 await self._connect_and_process(on_message, stop_event)
                 index = 0
+                logged_not_found = False
             except asyncio.CancelledError:
                 break
+            except (ConnectionRefusedError, OSError) as exc:
+                self._connected.clear()
+                if not logged_not_found:
+                    logger.info(
+                        "MeshCore Companion Frame Server not detected at %s:%s (%s). "
+                        "Radio alerts will automatically activate when a Companion identity is running.",
+                        self._host,
+                        self._port,
+                        exc,
+                    )
+                    logged_not_found = True
+                else:
+                    logger.debug("MeshCore connection retry failed: %s", exc)
             except Exception as exc:
                 self._connected.clear()
                 logger.warning("MeshCore connection lost: %s", exc)
@@ -108,7 +123,6 @@ class MeshCoreClient:
 
             delay = backoff[min(index, len(backoff) - 1)]
             index += 1
-            logger.info("Reconnecting to MeshCore at %s:%s in %ss...", self._host, self._port, delay)
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=delay)
             except asyncio.TimeoutError:
@@ -177,7 +191,24 @@ class MeshCoreClient:
         on_message: Callable[[IncomingMessage], Awaitable[None]],
         stop_event: asyncio.Event,
     ) -> None:
-        reader, writer = await asyncio.open_connection(self._host, self._port)
+        ports_to_try = [self._port]
+        alt_port = 5000 if self._port == 5050 else (5050 if self._port == 5000 else None)
+        if alt_port is not None:
+            ports_to_try.append(alt_port)
+
+        reader, writer = None, None
+        last_exc = None
+        for p in ports_to_try:
+            try:
+                reader, writer = await asyncio.open_connection(self._host, p)
+                self._port = p
+                break
+            except (ConnectionRefusedError, OSError) as exc:
+                last_exc = exc
+
+        if reader is None or writer is None:
+            raise last_exc or ConnectionError(f"Could not connect to MeshCore on {self._host}:{ports_to_try}")
+
         self._reader = reader
         self._writer = writer
         self._response_queue = asyncio.Queue()

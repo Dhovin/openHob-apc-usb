@@ -98,8 +98,14 @@ class UpsMonitor:
             self.driver = usb_driver
             return usb_driver
 
-        logger.warning("No active APC UPS found on NIS (%s:%s) or USB. Defaulting to NIS client with auto-reconnect.",
-                       self.settings.nis_host, self.settings.nis_port)
+        logger.warning(
+            "No active APC UPS found on NIS (%s:%s) or USB sysfs/hiddev. "
+            "To monitor via USB: 1) Ensure APC USB is plugged in, "
+            "2) Start apcupsd (sudo apt install apcupsd && sudo systemctl start apcupsd), "
+            "or set 'simulation_mode': true in plugin settings to test. Defaulting to NIS auto-reconnect.",
+            self.settings.nis_host,
+            self.settings.nis_port,
+        )
         self.driver = nis
         return nis
 
