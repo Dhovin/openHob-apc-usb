@@ -101,7 +101,14 @@ class Settings:
         if outage_update_interval_seconds < 0:
             raise ConfigError("outage_update_interval_seconds must be non-negative")
 
-        telemetry_beacon_interval = int(data.get("telemetry_beacon_interval_seconds", 0))
+        # Legacy migration: in v1.0.8 and earlier, telemetry_beacon_interval_seconds defaulted to 3600,
+        # which resulted in routine hourly direct messages even when utility power was normal.
+        # We sanitize legacy 3600 values to 0 (disabled) unless explicit_hourly_beacon is set.
+        raw_beacon_interval = int(data.get("telemetry_beacon_interval_seconds", 0))
+        if raw_beacon_interval == 3600 and not data.get("explicit_hourly_beacon"):
+            telemetry_beacon_interval = 0
+        else:
+            telemetry_beacon_interval = max(0, raw_beacon_interval)
         respond_to_queries = bool(data.get("respond_to_queries", True))
 
         raw_triggers = data.get("query_trigger_words", ("!ups", "/ups", "ups", "ups status"))
@@ -173,6 +180,16 @@ def load_settings(data_dir: Path | None = None) -> Settings:
         try:
             raw = json.loads(config_file.read_text(encoding="utf-8"))
             logger.info("Loaded configuration from %s", config_file)
+
+            # Auto-migrate legacy 3600s beacon interval on disk if present
+            if raw.get("telemetry_beacon_interval_seconds") == 3600 and not raw.get("explicit_hourly_beacon"):
+                raw["telemetry_beacon_interval_seconds"] = 0
+                try:
+                    config_file.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+                    logger.info("Migrated legacy telemetry_beacon_interval_seconds (3600 -> 0) in %s", config_file)
+                except Exception as write_err:
+                    logger.debug("Failed to persist migrated config: %s", write_err)
+
             return Settings.from_dict(raw)
         except Exception as exc:
             logger.warning("Failed to parse %s (%s); falling back to default configuration", config_file, exc)

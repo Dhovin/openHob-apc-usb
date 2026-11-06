@@ -390,6 +390,7 @@
 
         currentCfg.direct_recipient_pubkey = pubkey || null;
         currentCfg.direct_recipient_name = name || null;
+        currentCfg.telemetry_beacon_interval_seconds = 0; // ensure routine hourly beacons are silenced
         delete currentCfg._runtime;
 
         const postResp = await apiFetch("/api/plugins/settings", {

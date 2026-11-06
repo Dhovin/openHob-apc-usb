@@ -76,3 +76,26 @@ def test_direct_recipient_settings():
     # Hex too short (< 12 chars / 6 bytes)
     with pytest.raises(ConfigError, match="at least 6 bytes"):
         Settings.from_dict({"direct_recipient_pubkey": "4b2116"})
+
+
+def test_legacy_3600_beacon_sanitized(tmp_path):
+    # Dict with legacy 3600
+    s = Settings.from_dict({"telemetry_beacon_interval_seconds": 3600})
+    assert s.telemetry_beacon_interval_seconds == 0
+
+    # With explicit flag
+    s_explicit = Settings.from_dict({
+        "telemetry_beacon_interval_seconds": 3600,
+        "explicit_hourly_beacon": True,
+    })
+    assert s_explicit.telemetry_beacon_interval_seconds == 3600
+
+    # Test disk auto-migration in load_settings
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text('{"telemetry_beacon_interval_seconds": 3600}', encoding="utf-8")
+    loaded = load_settings(tmp_path)
+    assert loaded.telemetry_beacon_interval_seconds == 0
+    # Verify file was updated on disk
+    import json
+    updated = json.loads(cfg_file.read_text(encoding="utf-8"))
+    assert updated["telemetry_beacon_interval_seconds"] == 0
