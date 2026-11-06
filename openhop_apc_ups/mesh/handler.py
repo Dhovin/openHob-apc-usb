@@ -8,7 +8,18 @@ import time
 
 from ..config import Settings
 from ..ups.base import UPSData, UPSStatus
-from ..ups.monitor import EVENT_LOW_BATTERY, EVENT_POWER_LOST, EVENT_POWER_RESTORED, UpsMonitor
+from ..ups.monitor import (
+    EVENT_COMM_LOST,
+    EVENT_COMM_RESTORED,
+    EVENT_LOW_BATTERY,
+    EVENT_OUTAGE_UPDATE,
+    EVENT_OVERLOAD,
+    EVENT_OVERLOAD_CLEARED,
+    EVENT_POWER_LOST,
+    EVENT_POWER_RESTORED,
+    EVENT_REPLACE_BATTERY,
+    UpsMonitor,
+)
 from .client import IncomingMessage, MeshCoreClient
 from .text import clean_for_radio
 
@@ -65,7 +76,7 @@ class MeshHandler:
             pass
         return None
 
-    def on_ups_event(self, event_type: str, data: UPSData) -> None:
+    def on_ups_event(self, event_type: str, data: UPSData, message: str | None = None) -> None:
         """Schedule encrypted direct message alert for UPS state changes."""
         if not self.settings.meshcore_enabled or not self.mesh_client.connected:
             return
@@ -81,8 +92,13 @@ class MeshHandler:
                 f"[UPS ALERT] AC Power Lost! Running on UPS battery "
                 f"({data.battery_charge_pct:.0f}%, ~{data.time_left_minutes:.0f}m runtime)"
             )
+        elif event_type == EVENT_OUTAGE_UPDATE and self.settings.alert_on_outage_update:
+            text = f"[UPS UPDATE] {message}" if message else (
+                f"[UPS UPDATE] Outage ongoing. Battery: {data.battery_charge_pct:.0f}%, "
+                f"~{data.time_left_minutes:.0f}m runtime remaining"
+            )
         elif event_type == EVENT_POWER_RESTORED and self.settings.alert_on_power_restore:
-            text = (
+            text = f"[UPS NOTICE] {message}" if message else (
                 f"[UPS NOTICE] AC Power Restored. Line: {data.line_voltage:.0f}V. "
                 f"Battery: {data.battery_charge_pct:.0f}% (charging)"
             )
@@ -91,6 +107,16 @@ class MeshHandler:
                 f"[UPS CRITICAL] Battery Low: {data.battery_charge_pct:.0f}% "
                 f"(~{data.time_left_minutes:.0f}m remaining)! Node shutdown imminent"
             )
+        elif event_type == EVENT_OVERLOAD and self.settings.alert_on_overload:
+            text = f"[UPS CRITICAL] Overload Detected! UPS load: {data.load_pct:.0f}% exceeds capacity! Reduce load immediately."
+        elif event_type == EVENT_OVERLOAD_CLEARED and self.settings.alert_on_overload:
+            text = f"[UPS NOTICE] UPS Overload Cleared. Load: {data.load_pct:.0f}%."
+        elif event_type == EVENT_REPLACE_BATTERY and self.settings.alert_on_replace_battery:
+            text = "[UPS ALERT] Battery Replacement Needed: UPS reported bad battery or failed self-test (Replace Battery flag set)."
+        elif event_type == EVENT_COMM_LOST and self.settings.alert_on_comm_lost:
+            text = "[UPS WARNING] Communication Lost with UPS! Daemon cannot communicate with UPS hardware."
+        elif event_type == EVENT_COMM_RESTORED and self.settings.alert_on_comm_lost:
+            text = f"[UPS NOTICE] Communication Restored with UPS hardware ({data.model})."
 
         if text is not None:
             asyncio.create_task(self._send_direct_alert(recipient_prefix, text))
@@ -125,6 +151,7 @@ class MeshHandler:
         """Periodic telemetry beacon loop sent only to configured direct recipient."""
         interval = self.settings.telemetry_beacon_interval_seconds
         if interval <= 0:
+            logger.info("MeshCore periodic telemetry heartbeat beacon disabled (interval=0)")
             return
 
         recipient_prefix = self._get_recipient_prefix()

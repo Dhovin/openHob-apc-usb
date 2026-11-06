@@ -12,7 +12,15 @@ def test_default_settings():
     assert s.meshcore_port == 5050
     assert s.meshcore_channel_idx == 0
     assert s.alert_on_power_loss is True
+    assert s.alert_on_power_restore is True
+    assert s.alert_on_low_battery is True
+    assert s.alert_on_outage_update is True
+    assert s.alert_on_overload is True
+    assert s.alert_on_replace_battery is True
+    assert s.alert_on_comm_lost is True
     assert s.low_battery_threshold_percent == 25.0
+    assert s.outage_update_interval_seconds == 600
+    assert s.telemetry_beacon_interval_seconds == 0
 
 
 def test_custom_settings():
@@ -47,6 +55,9 @@ def test_invalid_port():
 def test_invalid_interval():
     with pytest.raises(ConfigError, match="poll_interval_seconds must be at least 1"):
         Settings.from_dict({"poll_interval_seconds": 0})
+
+    with pytest.raises(ConfigError, match="outage_update_interval_seconds must be non-negative"):
+        Settings.from_dict({"outage_update_interval_seconds": -5})
 
 
 def test_direct_recipient_settings():

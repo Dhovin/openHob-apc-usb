@@ -28,6 +28,25 @@ logger = logging.getLogger(__name__)
 EVENT_POWER_LOST = "power_lost"
 EVENT_POWER_RESTORED = "power_restored"
 EVENT_LOW_BATTERY = "low_battery"
+EVENT_OUTAGE_UPDATE = "outage_update"
+EVENT_OVERLOAD = "overload"
+EVENT_OVERLOAD_CLEARED = "overload_cleared"
+EVENT_REPLACE_BATTERY = "replace_battery"
+EVENT_COMM_LOST = "comm_lost"
+EVENT_COMM_RESTORED = "comm_restored"
+
+
+def format_duration(seconds: float) -> str:
+    """Format duration in seconds into human-readable string like '14s', '8m', '1h 15m'."""
+    secs = int(max(0, seconds))
+    if secs < 60:
+        return f"{secs}s"
+    mins = secs // 60
+    if mins < 60:
+        return f"{mins}m"
+    hours = mins // 60
+    rem_mins = mins % 60
+    return f"{hours}h {rem_mins}m"
 
 
 def get_nis_candidate_hosts(primary_host: str) -> list[str]:
@@ -72,6 +91,12 @@ class UpsMonitor:
         self._current_data: UPSData | None = None
         self._previous_data: UPSData | None = None
         self._low_battery_alert_fired = False
+        self._outage_start_time: float | None = None
+        self._last_outage_update_time: float | None = None
+        self._overload_alert_fired = False
+        self._replace_battery_alert_fired = False
+        self._comm_lost_alert_fired = False
+        self._comm_lost_count = 0
 
         self._history: deque[dict[str, Any]] = deque(maxlen=60)
         self._events: deque[dict[str, Any]] = deque(maxlen=30)
@@ -231,7 +256,10 @@ class UpsMonitor:
 
         for listener in self._listeners:
             try:
-                listener(event_name, data)
+                try:
+                    listener(event_name, data, message)
+                except TypeError:
+                    listener(event_name, data)
             except Exception as exc:
                 logger.exception("Error in UPS event listener: %s", exc)
 
@@ -240,18 +268,44 @@ class UpsMonitor:
         if prev is None:
             return
 
-        # Check for Power Loss
+        now = time.time()
+
+        # 1. Power Loss Transition
         if not prev.is_on_battery and data.is_on_battery:
+            self._outage_start_time = now
+            self._last_outage_update_time = now
             msg = f"Utility power lost! Running on battery ({data.battery_charge_pct:.0f}%, ~{data.time_left_minutes:.0f} min remaining)"
             self._record_event(EVENT_POWER_LOST, msg, data)
 
-        # Check for Power Restored
+        # 2. Ongoing Outage Periodic Progress Update (every N minutes)
+        elif data.is_on_battery:
+            if self._outage_start_time is None:
+                self._outage_start_time = now
+                self._last_outage_update_time = now
+
+            interval = self.settings.outage_update_interval_seconds
+            if interval > 0 and (now - (self._last_outage_update_time or self._outage_start_time)) >= interval:
+                self._last_outage_update_time = now
+                elapsed_str = format_duration(now - self._outage_start_time)
+                msg = (
+                    f"Outage ongoing ({elapsed_str} on battery). "
+                    f"Battery: {data.battery_charge_pct:.0f}%, ~{data.time_left_minutes:.0f}m runtime remaining"
+                )
+                self._record_event(EVENT_OUTAGE_UPDATE, msg, data)
+
+        # 3. Power Restored Transition
         if prev.is_on_battery and not data.is_on_battery:
             self._low_battery_alert_fired = False
-            msg = f"Utility power restored! Line voltage: {data.line_voltage:.0f}V, Battery: {data.battery_charge_pct:.0f}%"
+            duration_str = ""
+            if self._outage_start_time is not None:
+                duration_str = f" (Outage duration: {format_duration(now - self._outage_start_time)})"
+            self._outage_start_time = None
+            self._last_outage_update_time = None
+
+            msg = f"Utility power restored{duration_str}! Line voltage: {data.line_voltage:.0f}V, Battery: {data.battery_charge_pct:.0f}%"
             self._record_event(EVENT_POWER_RESTORED, msg, data)
 
-        # Check for Low Battery warning
+        # 4. Low Battery warning
         is_low = (
             data.is_on_battery and (
                 data.battery_charge_pct <= self.settings.low_battery_threshold_percent or
@@ -264,6 +318,41 @@ class UpsMonitor:
             self._low_battery_alert_fired = True
             msg = f"Low battery warning: {data.battery_charge_pct:.0f}% (~{data.time_left_minutes:.0f} min remaining)! Impending node shutdown"
             self._record_event(EVENT_LOW_BATTERY, msg, data)
+
+        # 5. Overload Detection
+        is_overload = data.status_enum == UPSStatus.OVERLOAD or "OVERLOAD" in data.status
+        if is_overload and not self._overload_alert_fired:
+            self._overload_alert_fired = True
+            msg = f"Overload detected! Load: {data.load_pct:.0f}% exceeds UPS rating! Reduce connected load immediately."
+            self._record_event(EVENT_OVERLOAD, msg, data)
+        elif not is_overload and self._overload_alert_fired:
+            self._overload_alert_fired = False
+            msg = f"Overload cleared. Normal load restored: {data.load_pct:.0f}%."
+            self._record_event(EVENT_OVERLOAD_CLEARED, msg, data)
+
+        # 6. Replace Battery Alert
+        is_replace_batt = "REPLACEBATT" in data.status or "REPLACE" in data.status
+        if is_replace_batt and not self._replace_battery_alert_fired:
+            self._replace_battery_alert_fired = True
+            msg = "Battery replacement required! UPS reported bad battery or failed self-test."
+            self._record_event(EVENT_REPLACE_BATTERY, msg, data)
+        elif not is_replace_batt and self._replace_battery_alert_fired:
+            self._replace_battery_alert_fired = False
+
+        # 7. Communication Lost with UPS Hardware (debounced over 2 polls)
+        is_comm_lost = data.status_enum == UPSStatus.COMM_LOST or "COMMLOST" in data.status
+        if is_comm_lost:
+            self._comm_lost_count += 1
+            if self._comm_lost_count >= 2 and not self._comm_lost_alert_fired:
+                self._comm_lost_alert_fired = True
+                msg = "Communication lost with UPS hardware! Check USB connection and apcupsd."
+                self._record_event(EVENT_COMM_LOST, msg, data)
+        else:
+            if self._comm_lost_alert_fired:
+                self._comm_lost_alert_fired = False
+                msg = f"Communication restored with UPS hardware ({data.model})."
+                self._record_event(EVENT_COMM_RESTORED, msg, data)
+            self._comm_lost_count = 0
 
     async def run(self, stop_event: asyncio.Event) -> None:
         """Continuous polling loop until stop_event is set."""

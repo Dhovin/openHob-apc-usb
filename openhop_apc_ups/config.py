@@ -32,9 +32,14 @@ class Settings:
     alert_on_power_loss: bool = True
     alert_on_power_restore: bool = True
     alert_on_low_battery: bool = True
+    alert_on_outage_update: bool = True
+    alert_on_overload: bool = True
+    alert_on_replace_battery: bool = True
+    alert_on_comm_lost: bool = True
     low_battery_threshold_percent: float = 25.0
     low_battery_threshold_minutes: float = 10.0
-    telemetry_beacon_interval_seconds: int = 3600
+    outage_update_interval_seconds: int = 600
+    telemetry_beacon_interval_seconds: int = 0
     respond_to_queries: bool = True
     query_trigger_words: tuple[str, ...] = ("!ups", "/ups", "ups", "ups status")
     direct_recipient_pubkey: str | None = None
@@ -79,6 +84,10 @@ class Settings:
         alert_on_power_loss = bool(data.get("alert_on_power_loss", True))
         alert_on_power_restore = bool(data.get("alert_on_power_restore", True))
         alert_on_low_battery = bool(data.get("alert_on_low_battery", True))
+        alert_on_outage_update = bool(data.get("alert_on_outage_update", True))
+        alert_on_overload = bool(data.get("alert_on_overload", True))
+        alert_on_replace_battery = bool(data.get("alert_on_replace_battery", True))
+        alert_on_comm_lost = bool(data.get("alert_on_comm_lost", True))
 
         low_battery_threshold_percent = float(data.get("low_battery_threshold_percent", 25.0))
         if not (0.0 <= low_battery_threshold_percent <= 100.0):
@@ -88,7 +97,11 @@ class Settings:
         if low_battery_threshold_minutes < 0:
             raise ConfigError("low_battery_threshold_minutes must be non-negative")
 
-        telemetry_beacon_interval = int(data.get("telemetry_beacon_interval_seconds", 3600))
+        outage_update_interval_seconds = int(data.get("outage_update_interval_seconds", 600))
+        if outage_update_interval_seconds < 0:
+            raise ConfigError("outage_update_interval_seconds must be non-negative")
+
+        telemetry_beacon_interval = int(data.get("telemetry_beacon_interval_seconds", 0))
         respond_to_queries = bool(data.get("respond_to_queries", True))
 
         raw_triggers = data.get("query_trigger_words", ("!ups", "/ups", "ups", "ups status"))
@@ -133,8 +146,13 @@ class Settings:
             alert_on_power_loss=alert_on_power_loss,
             alert_on_power_restore=alert_on_power_restore,
             alert_on_low_battery=alert_on_low_battery,
+            alert_on_outage_update=alert_on_outage_update,
+            alert_on_overload=alert_on_overload,
+            alert_on_replace_battery=alert_on_replace_battery,
+            alert_on_comm_lost=alert_on_comm_lost,
             low_battery_threshold_percent=low_battery_threshold_percent,
             low_battery_threshold_minutes=low_battery_threshold_minutes,
+            outage_update_interval_seconds=outage_update_interval_seconds,
             telemetry_beacon_interval_seconds=telemetry_beacon_interval,
             respond_to_queries=respond_to_queries,
             query_trigger_words=query_trigger_words,
